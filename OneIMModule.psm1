@@ -6,18 +6,54 @@ $script:OimDir  = 'C:\Program Files\One Identity\One Identity Manager'
 $script:DllPath = Join-Path $PSScriptRoot 'OneIMModule.dll'
 $script:SrcPath = Join-Path $PSScriptRoot 'OneIMModule.cs'
 
-# Register assembly resolver so OIM transitive dependencies are found at runtime
-$script:OimDirLocal = $script:OimDir
-$script:Resolver = [System.ResolveEventHandler] {
-    param($sender, $resolveArgs)
-    $asmName  = ([System.Reflection.AssemblyName] $resolveArgs.Name).Name
-    $fullPath = Join-Path $script:OimDirLocal "$asmName.dll"
-    if (Test-Path $fullPath) {
-        return [System.Reflection.Assembly]::LoadFile($fullPath)
+# Compile a pure-C# resolver — a PS script block delegate cannot be used here because
+# invoking it requires the PS runtime, which loads assemblies, which re-fires the event.
+Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+
+namespace OneIMModule
+{
+    public static class AssemblyResolver
+    {
+        private static string _dir;
+        private static readonly HashSet<string> _loading =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        public static void Register(string searchDir)
+        {
+            _dir = searchDir;
+            AppDomain.CurrentDomain.AssemblyResolve += OnResolve;
+        }
+
+        public static void Unregister()
+        {
+            AppDomain.CurrentDomain.AssemblyResolve -= OnResolve;
+        }
+
+        private static Assembly OnResolve(object sender, ResolveEventArgs args)
+        {
+            string name = new AssemblyName(args.Name).Name;
+
+            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+                if (string.Equals(a.GetName().Name, name, StringComparison.OrdinalIgnoreCase))
+                    return a;
+
+            if (!_loading.Add(name)) return null;
+            try
+            {
+                string path = Path.Combine(_dir, name + ".dll");
+                return File.Exists(path) ? Assembly.LoadFile(path) : null;
+            }
+            finally { _loading.Remove(name); }
+        }
     }
-    return $null
 }
-[System.AppDomain]::CurrentDomain.add_AssemblyResolve($script:Resolver)
+'@
+
+[OneIMModule.AssemblyResolver]::Register($script:OimDir)
 
 # Load required OIM assemblies
 foreach ($dll in @('VI.Base', 'VI.DB', 'VI.DB.Compile', 'NLog')) {
@@ -63,9 +99,7 @@ Write-Verbose "OneIMModule ready. Cmdlets: Connect-OneIM, Disconnect-OneIM, Get-
 
 # Cleanup on module removal
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
-    try {
-        [System.AppDomain]::CurrentDomain.remove_AssemblyResolve($script:Resolver)
-    } catch { }
+    try { [OneIMModule.AssemblyResolver]::Unregister() } catch { }
     try {
         if ([OneIMModule.OneIMSessionStore]::Current -ne $null) {
             [OneIMModule.OneIMSessionStore]::Current.Dispose()
