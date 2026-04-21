@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Management.Automation;
 using System.Threading;
 using VI.Base.Logging;
@@ -206,6 +207,170 @@ namespace OneIMModule
             {
                 ThrowTerminatingError(new ErrorRecord(
                     ex, "OneIM.CompileFailed", ErrorCategory.OperationStopped, null));
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Invoke-OneIMMethod
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Invokes a method on a One Identity Manager entity.
+    ///
+    /// SYNOPSIS
+    ///   Invoke-OneIMMethod -Table "Person" -Key "abc-123" -Method "MethodName" `
+    ///                      [-Parameters @{ param1 = "value"; param2 = 42 }]
+    ///
+    /// Use [ordered]@{} when parameter order matters.
+    /// Returns the method result if any; void methods produce no output.
+    /// </summary>
+    [Cmdlet(VerbsLifecycle.Invoke, "OneIMMethod")]
+    [OutputType(typeof(object))]
+    public class InvokeOneIMMethodCmdlet : PSCmdlet
+    {
+        [Parameter(Mandatory = true, Position = 0, HelpMessage = "OIM table name, e.g. \"Person\"")]
+        public string Table { get; set; }
+
+        [Parameter(Mandatory = true, Position = 1, HelpMessage = "Primary key value of the entity")]
+        public string Key { get; set; }
+
+        [Parameter(Mandatory = true, Position = 2, HelpMessage = "Method name to invoke")]
+        public string Method { get; set; }
+
+        [Parameter(Position = 3, HelpMessage = "Method parameters as a hashtable. Use [ordered]@{} when order matters.")]
+        public System.Collections.Hashtable Parameters { get; set; }
+
+        protected override void ProcessRecord()
+        {
+            try { OneIMSessionStore.EnsureConnected(); }
+            catch (Exception ex)
+            {
+                ThrowTerminatingError(new ErrorRecord(
+                    ex, "OneIM.NotConnected", ErrorCategory.InvalidOperation, null));
+                return;
+            }
+
+            try
+            {
+                IEntitySource source = OneIMSessionStore.Current.Resolve<IEntitySource>();
+
+                IEntity entity = EntitySourceExtensions
+                    .GetAsync(source, Table, Key, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+
+                object[] paramValues;
+                Type[]   paramTypes;
+
+                if (Parameters != null && Parameters.Count > 0)
+                {
+                    paramValues = new object[Parameters.Count];
+                    paramTypes  = new Type[Parameters.Count];
+                    int i = 0;
+                    foreach (System.Collections.DictionaryEntry entry in Parameters)
+                    {
+                        paramValues[i] = entry.Value;
+                        paramTypes[i]  = entry.Value != null ? entry.Value.GetType() : typeof(object);
+                        i++;
+                    }
+                }
+                else
+                {
+                    paramValues = new object[0];
+                    paramTypes  = new Type[0];
+                }
+
+                WriteVerbose(string.Format("Invoking method '{0}' on {1} [{2}]", Method, Table, Key));
+
+                object result = entity
+                    .CallFunctionAsync(Method, paramTypes, paramValues, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+
+                if (result != null)
+                    WriteObject(result);
+            }
+            catch (Exception ex)
+            {
+                ThrowTerminatingError(new ErrorRecord(
+                    ex, "OneIM.InvokeMethodFailed", ErrorCategory.OperationStopped, Method));
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Get-OneIMEntity
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Queries entities from an OIM table and returns them as PSObjects.
+    ///
+    /// SYNOPSIS
+    ///   Get-OneIMEntity -Table "Person" [-Filter "LastName = 'Smith'"] [-Take 50] [-Skip 0]
+    /// </summary>
+    [Cmdlet(VerbsCommon.Get, "OneIMEntity")]
+    [OutputType(typeof(PSObject))]
+    public class GetOneIMEntityCmdlet : PSCmdlet
+    {
+        [Parameter(Mandatory = true, Position = 0, HelpMessage = "OIM table name, e.g. \"Person\"")]
+        public string Table { get; set; }
+
+        [Parameter(Position = 1, HelpMessage = "SQL WHERE clause, e.g. \"LastName = 'Smith'\"")]
+        public string Filter { get; set; }
+
+        private int _take = 100;
+        [Parameter(HelpMessage = "Maximum rows to return (default 100)")]
+        public int Take { get { return _take; } set { _take = value; } }
+
+        private int _skip = 0;
+        [Parameter(HelpMessage = "Rows to skip (default 0)")]
+        public int Skip { get { return _skip; } set { _skip = value; } }
+
+        protected override void ProcessRecord()
+        {
+            try { OneIMSessionStore.EnsureConnected(); }
+            catch (Exception ex)
+            {
+                ThrowTerminatingError(new ErrorRecord(
+                    ex, "OneIM.NotConnected", ErrorCategory.InvalidOperation, null));
+                return;
+            }
+
+            try
+            {
+                IEntitySource source = OneIMSessionStore.Current.Resolve<IEntitySource>();
+
+                // Build query — ISelect is implemented by Query so casts are safe
+                Query query = (Query)Query.From(Table);
+                query = query.SelectAll();
+                if (!string.IsNullOrEmpty(Filter))
+                    query = query.Where(Filter);
+                query = (Query)((ISelect)query).Take(_take);
+                if (_skip > 0)
+                    query = (Query)((ISelect)query).Skip(_skip);
+
+                IEntityCollection collection = EntitySourceExtensions
+                    .GetCollectionAsync(source, query, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+
+                List<string> colNames = new List<string>(collection.ColumnIndices.Keys);
+
+                foreach (IEntity entity in collection)
+                {
+                    PSObject obj = new PSObject();
+                    foreach (string colName in colNames)
+                    {
+                        object val;
+                        try   { val = entity.Columns[colName].GetValue(); }
+                        catch { val = null; }
+                        obj.Properties.Add(new PSNoteProperty(colName, val));
+                    }
+                    WriteObject(obj);
+                }
+            }
+            catch (Exception ex)
+            {
+                ThrowTerminatingError(new ErrorRecord(
+                    ex, "OneIM.GetEntityFailed", ErrorCategory.OperationStopped, Table));
             }
         }
     }

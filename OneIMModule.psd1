@@ -14,6 +14,8 @@
         'Disconnect-OneIM'
         'Get-OneIMSession'
         'Invoke-OneIMCompile'
+        'Get-OneIMEntity'
+        'Invoke-OneIMMethod'
     )
     VariablesToExport = @()
     AliasesToExport   = @()

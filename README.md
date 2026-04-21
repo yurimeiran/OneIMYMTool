@@ -104,6 +104,66 @@ Invoke-OneIMCompile -All -WaitForCompiler -IgnoreErrors
 
 ---
 
+### `Get-OneIMEntity`
+
+Queries entities from an OIM table and returns them as `PSObject` instances.
+
+**Parameters**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `Table` | string | Yes | OIM table name, e.g. `Person` |
+| `Filter` | string | No | SQL WHERE clause, e.g. `LastName = 'Smith'` |
+| `Take` | int | No | Maximum rows to return (default 100) |
+| `Skip` | int | No | Rows to skip for pagination (default 0) |
+
+**Examples**
+
+```powershell
+# Get first 100 rows from Person
+Get-OneIMEntity -Table "Person"
+
+# Filter by last name, return up to 10 rows
+Get-OneIMEntity -Table "Person" -Filter "LastName = 'Smith'" -Take 10
+
+# Paginate — get rows 101-200
+Get-OneIMEntity -Table "Person" -Take 100 -Skip 100
+
+# Pipeline into Select-Object
+Get-OneIMEntity -Table "Person" -Take 5 | Select-Object FirstName, LastName, DefaultEMailAddress
+```
+
+---
+
+### `Invoke-OneIMMethod`
+
+Invokes a method on an OIM entity identified by table and primary key.
+
+**Parameters**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `Table` | string | Yes | OIM table name, e.g. `Person` |
+| `Key` | string | Yes | Primary key value of the entity |
+| `Method` | string | Yes | Method name to invoke |
+| `Parameters` | Hashtable | No | Method parameters. Use `[ordered]@{}` when order matters. |
+
+**Examples**
+
+```powershell
+# Invoke a method with no parameters
+Invoke-OneIMMethod -Table "Person" -Key "abc-123" -Method "Reactivate"
+
+# Invoke with parameters (use [ordered] to preserve order)
+Invoke-OneIMMethod -Table "Person" -Key "abc-123" -Method "SendEmail" `
+    -Parameters ([ordered]@{ Subject = "Hello"; Body = "World" })
+
+# Capture return value
+$result = Invoke-OneIMMethod -Table "Person" -Key "abc-123" -Method "GetStatus"
+```
+
+---
+
 ## Full example
 
 ```powershell
@@ -115,6 +175,12 @@ Connect-OneIM `
     -Verbose
 
 Get-OneIMSession
+
+# Query entities
+Get-OneIMEntity -Table "Person" -Filter "IsInActive = 0" -Take 20 | Select-Object FirstName, LastName
+
+# Invoke a method on an entity
+Invoke-OneIMMethod -Table "Person" -Key "<uid>" -Method "Reactivate"
 
 Invoke-OneIMCompile -All -Verbose
 

@@ -95,7 +95,7 @@ if (-not (Test-Path $script:DllPath)) {
 # Import the compiled binary cmdlet DLL
 Import-Module $script:DllPath -Global -Force
 
-Write-Verbose "OneIMModule ready. Cmdlets: Connect-OneIM, Disconnect-OneIM, Get-OneIMSession, Invoke-OneIMCompile"
+Write-Verbose "OneIMModule ready. Cmdlets: Connect-OneIM, Disconnect-OneIM, Get-OneIMSession, Invoke-OneIMCompile, Get-OneIMEntity, Invoke-OneIMMethod"
 
 # Cleanup on module removal
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
