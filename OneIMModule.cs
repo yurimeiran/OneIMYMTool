@@ -256,7 +256,7 @@ namespace OneIMModule
                 IEntitySource source = OneIMSessionStore.Current.Resolve<IEntitySource>();
 
                 IEntity entity = EntitySourceExtensions
-                    .GetAsync(source, Table, Key, CancellationToken.None)
+                    .GetAsync(source, Table, Key, EntityLoadType.Interactive, CancellationToken.None)
                     .GetAwaiter().GetResult();
 
                 object[] paramValues;
